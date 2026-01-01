@@ -7,12 +7,24 @@ import cv2
 import numpy as np
 import pandas as pd  
 sys.path.append('../')
-from utils import get_center_of_bbox, get_bbox_width
+from utils import get_center_of_bbox, get_bbox_width, get_foot_position
 
 class Tracker:
     def __init__(self, model_path):
         self.model = YOLO(model_path)
         self.tracker = sv.ByteTrack()
+
+    def add_position_to_tracks(self, tracks):
+        for object, object_tracks in tracks.items():
+            for frame_num, track in enumerate(object_tracks):
+                for track_id, track_info in track.items():
+                    bbox = track_info['bbox']
+                    if object == 'ball':
+                        position = get_center_of_bbox(bbox)
+                    else:
+                        position = get_foot_position(bbox)
+                    tracks[object][frame_num][track_id]['position'] = position
+        
 
     def interpolate_ball_positions(self, ball_positions):
         ball_positions = [x.get(1,{}).get('bbox', []) for x in ball_positions ]
@@ -159,8 +171,47 @@ class Tracker:
         return frame
         
 
+    def draw_team_ball_control(self, frame, frame_num, team_ball_control):
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (1350, 850), (1900, 970), (255,255,255), -1)
+        alpha = 0.4
+        cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
 
-    def draw_annotations(self, video_frames, tracks):
+        team_ball_control_till_frame = team_ball_control[:frame_num+1]
+
+        team_1_num_frames = team_ball_control_till_frame[team_ball_control_till_frame==1].shape[0]
+        team_2_num_frames = team_ball_control_till_frame[team_ball_control_till_frame==2].shape[0]
+
+        team_1 = team_1_num_frames / (team_1_num_frames+team_2_num_frames)
+        team_2 = team_2_num_frames / (team_1_num_frames+team_2_num_frames)
+
+        cv2.putText(
+            frame,
+            f"Team 1: {team_1*100:.2f}",
+            (1400, 900),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (0,0,0),
+            2,
+            cv2.LINE_4,
+        )
+
+        cv2.putText(
+            frame,
+            f"Team 2: {team_2*100:.2f}",
+            (1400, 950),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (0,0,0),
+            2,
+            cv2.LINE_4,
+        )
+
+        return frame
+
+        
+
+    def draw_annotations(self, video_frames, tracks, team_ball_control):
         output_video_frames = []
         for frame_num, frame in enumerate(video_frames):
             frame = frame.copy()
@@ -190,6 +241,10 @@ class Tracker:
                 #Draw ball
                 for track_id, ball in ball_dict.items():
                     frame = self.draw_triangle(frame, ball['bbox'], color=(0, 255, 0))
+
+
+                #Draw team ball control
+                frame = self.draw_team_ball_control(frame, frame_num, team_ball_control)
 
             output_video_frames.append(frame)
 
